@@ -1,4 +1,4 @@
-use core::f64;
+use core::{f64, str};
 use std::{env, error::Error, fs, path::Path, process};
 
 use std::collections::hash_map::DefaultHasher;
@@ -66,8 +66,41 @@ fn run(config: &Config) -> Result<(), Box<dyn Error>> {
             fs::write(&path, contents)?;
             println!("Wrote data to {}", &path.display());
         }
-        Config::Check { dictionary, file } => {}
-        _ => (),
+        Config::Check { dictionary, file } => {
+            if !dictionary.ends_with(".spell") {
+                return Err("The dictionary file must have a .spell extension".into());
+            }
+
+            let bytes = fs::read(dictionary)?;
+            if str::from_utf8(&bytes[0..=6])? != "kkspell" {
+                return Err(format!("the file: {} is not a valid .spell file", dictionary).into());
+            }
+
+            // 2e == '.'
+            let mut iter = bytes.split(|&b| b == 0x2e).skip(1).take(3);
+            let k = str::from_utf8(iter.next().ok_or("parsing error")?)?.parse::<usize>()?;
+            let m = str::from_utf8(iter.next().ok_or("parsing error")?)?.parse::<usize>()?;
+
+            let bit_array = iter.next().ok_or("parsing error")?;
+            println!("{:?}", &bit_array[0..50]);
+
+            let words = fs::read_to_string(file)?;
+            let words: Vec<&str> = words.split_ascii_whitespace().collect();
+            for word in words {
+                let mut hasher = DefaultHasher::new();
+                word.hash(&mut hasher);
+                let word_hash = hasher.finish();
+
+                for i in 0..k {
+                    let combined_hash = word_hash.wrapping_add((i as u64) * 0x9e3779b9);
+                    let index = (combined_hash % m as u64) as usize;
+                    if bit_array[index] == 0 {
+                        println!("{} is misspelled", word);
+                        break;
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
